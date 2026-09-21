@@ -85,6 +85,14 @@
     min-width: 0;
   }
   #addmore { padding: 6px 12px; font-size: 14px; }
+  .movebtn {
+    padding: 6px 10px;
+    font-size: 14px;
+    line-height: 1;
+  }
+  .movebtn:disabled { opacity: .35; cursor: default; }
+  .thumb.dropside-left { border-left-color: var(--ink); }
+  .thumb.dropside-right { border-right-color: var(--ink); }
 
   #stage {
     flex: 1;
@@ -193,6 +201,8 @@
   <div id="topbar">
     <span id="counter">1 / 1</span>
     <span id="caption"></span>
+    <button class="movebtn" id="moveleft" title="Move this photo earlier" aria-label="Move this photo earlier">&#8249;&#8249;</button>
+    <button class="movebtn" id="moveright" title="Move this photo later" aria-label="Move this photo later">&#8250;&#8250;</button>
     <button id="addmore">Add photos</button>
   </div>
   <div id="stage">
@@ -208,8 +218,9 @@
 
 <script>
 (function () {
-  var photos = [];      // { src, name }
+  var photos = [];      // { src, name, caption }
   var index = 0;
+  var dragFrom = null;
 
   var empty = document.getElementById("empty");
   var viewer = document.getElementById("viewer");
@@ -265,14 +276,43 @@
     photos.forEach(function (item, i) {
       var b = document.createElement("button");
       b.className = "thumb" + (i === index ? " current" : "");
-      b.setAttribute("aria-label", "Show photo " + (i + 1));
+      b.setAttribute("aria-label", "Show photo " + (i + 1) + " (drag to reorder)");
+      b.draggable = true;
       var img = document.createElement("img");
       img.src = item.src;
       img.alt = "";
       b.appendChild(img);
       b.addEventListener("click", function () { index = i; render(); });
+
+      b.addEventListener("dragstart", function (e) {
+        dragFrom = i;
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+      });
+      b.addEventListener("dragover", function (e) {
+        e.preventDefault();
+        var before = e.offsetX < b.offsetWidth / 2;
+        b.classList.toggle("dropside-left", before);
+        b.classList.toggle("dropside-right", !before);
+      });
+      b.addEventListener("dragleave", function () {
+        b.classList.remove("dropside-left", "dropside-right");
+      });
+      b.addEventListener("drop", function (e) {
+        e.preventDefault();
+        b.classList.remove("dropside-left", "dropside-right");
+        if (dragFrom === null) return;
+        var before = e.offsetX < b.offsetWidth / 2;
+        var to = before ? i : i + 1;
+        if (dragFrom < to) to--;
+        move(dragFrom, to);
+        dragFrom = null;
+      });
+      b.addEventListener("dragend", function () { dragFrom = null; });
+
       strip.appendChild(b);
     });
+    document.getElementById("moveleft").disabled = index === 0;
+    document.getElementById("moveright").disabled = index === photos.length - 1;
     var current = strip.children[index];
     if (current && current.scrollIntoView) {
       current.scrollIntoView({ block: "nearest", inline: "center" });
@@ -291,6 +331,17 @@
     readFiles(picker.files);
     picker.value = "";
   });
+
+  function move(from, to) {
+    if (from === to || to < 0 || to >= photos.length) return;
+    var item = photos.splice(from, 1)[0];
+    photos.splice(to, 0, item);
+    index = to;
+    render();
+  }
+
+  document.getElementById("moveleft").addEventListener("click", function () { move(index, index - 1); });
+  document.getElementById("moveright").addEventListener("click", function () { move(index, index + 1); });
 
   document.getElementById("prev").addEventListener("click", function () { step(-1); });
   document.getElementById("next").addEventListener("click", function () { step(1); });
