@@ -160,6 +160,7 @@
     overflow-x: auto;
     flex: none;
   }
+  .thumbwrap { position: relative; flex: none; }
   .thumb {
     flex: none;
     width: 56px;
@@ -172,7 +173,35 @@
     cursor: pointer;
     opacity: .55;
     transition: opacity .15s;
+    display: block;
   }
+  .del {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 1px solid var(--line);
+    background: var(--bg);
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1;
+    padding: 0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .del:hover { color: var(--ink); border-color: var(--muted); }
+  #notice {
+    display: none;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    padding: 0 16px 8px;
+  }
+  #notice.show { display: block; }
   .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .thumb.current { border-color: var(--ink); opacity: 1; }
   .thumb:hover { opacity: 1; }
@@ -192,7 +221,7 @@
 
 <div id="empty">
   <h1>Photo viewer</h1>
-  <p>Add photos from your device, then click or swipe through them. Nothing is uploaded anywhere — photos stay in this window.</p>
+  <p>Add photos from your device, then click or swipe through them. Photos are saved in this browser only — nothing is uploaded anywhere.</p>
   <button id="pick">Add photos</button>
   <p>You can also drag and drop images here.</p>
 </div>
@@ -214,6 +243,7 @@
     <input id="captioninput" type="text" placeholder="Add a caption…" maxlength="200" aria-label="Photo caption">
   </div>
   <div id="strip" role="tablist" aria-label="Photo thumbnails"></div>
+  <div id="notice"></div>
 </div>
 
 <script>
@@ -230,9 +260,57 @@
   var caption = document.getElementById("caption");
   var strip = document.getElementById("strip");
   var captionInput = document.getElementById("captioninput");
+  var notice = document.getElementById("notice");
+
+  var STORAGE_KEY = "photo-viewer-gallery";
+  var saveTimer = null;
+
+  function save() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(function () {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(photos));
+        notice.classList.remove("show");
+      } catch (err) {
+        notice.textContent = "Storage is full — this change won't survive a reload. Remove a photo or two to make room.";
+        notice.classList.add("show");
+      }
+    }, 400);
+  }
+
+  function load() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      var parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length) {
+        photos = parsed;
+        index = 0;
+        render();
+      }
+    } catch (err) { /* corrupt or unavailable storage: start fresh */ }
+  }
+
+  // Downscale to keep localStorage happy while staying sharp in an embed
+  function shrink(dataUrl, done) {
+    var img = new Image();
+    img.onload = function () {
+      var MAX = 1600;
+      var w = img.width, h = img.height;
+      if (w <= MAX && h <= MAX) { done(dataUrl); return; }
+      var scale = MAX / Math.max(w, h);
+      var canvas = document.createElement("canvas");
+      canvas.width = Math.round(w * scale);
+      canvas.height = Math.round(h * scale);
+      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+      done(canvas.toDataURL("image/jpeg", 0.85));
+    };
+    img.onerror = function () { done(dataUrl); };
+    img.src = dataUrl;
+  }
 
   captionInput.addEventListener("input", function () {
-    if (photos[index]) photos[index].caption = captionInput.value;
+    if (photos[index]) { photos[index].caption = captionInput.value; save(); }
   });
   captionInput.addEventListener("keydown", function (e) {
     if (e.key === "Enter") captionInput.blur();
@@ -247,14 +325,17 @@
     files.forEach(function (file) {
       var reader = new FileReader();
       reader.onload = function () {
-        photos.push({ src: reader.result, name: file.name.replace(/\.[^.]+$/, "") });
-        if (--pending === 0) {
-          index = photos.length - files.length; // jump to first newly added
-          render();
-        }
+        shrink(reader.result, function (small) {
+          photos.push({ src: small, name: file.name.replace(/\.[^.]+$/, "") });
+          if (--pending === 0) {
+            index = photos.length - files.length; // jump to first newly added
+            render();
+            save();
+          }
+        });
       };
       reader.onerror = function () {
-        if (--pending === 0) render();
+        if (--pending === 0) { render(); save(); }
       };
       reader.readAsDataURL(file);
     });
@@ -274,6 +355,9 @@
 
     strip.innerHTML = "";
     photos.forEach(function (item, i) {
+      var wrap = document.createElement("div");
+      wrap.className = "thumbwrap";
+
       var b = document.createElement("button");
       b.className = "thumb" + (i === index ? " current" : "");
       b.setAttribute("aria-label", "Show photo " + (i + 1) + " (drag to reorder)");
@@ -309,7 +393,19 @@
       });
       b.addEventListener("dragend", function () { dragFrom = null; });
 
-      strip.appendChild(b);
+      var del = document.createElement("button");
+      del.className = "del";
+      del.textContent = "\u00d7";
+      del.setAttribute("aria-label", "Remove photo " + (i + 1));
+      del.title = "Remove photo";
+      del.addEventListener("click", function (e) {
+        e.stopPropagation();
+        removeAt(i);
+      });
+
+      wrap.appendChild(b);
+      wrap.appendChild(del);
+      strip.appendChild(wrap);
     });
     document.getElementById("moveleft").disabled = index === 0;
     document.getElementById("moveright").disabled = index === photos.length - 1;
@@ -338,6 +434,20 @@
     photos.splice(to, 0, item);
     index = to;
     render();
+    save();
+  }
+
+  function removeAt(i) {
+    photos.splice(i, 1);
+    if (index >= photos.length) index = Math.max(0, photos.length - 1);
+    if (!photos.length) {
+      viewer.classList.remove("active");
+      empty.style.display = "";
+      try { localStorage.removeItem(STORAGE_KEY); } catch (err) {}
+      return;
+    }
+    render();
+    save();
   }
 
   document.getElementById("moveleft").addEventListener("click", function () { move(index, index - 1); });
@@ -375,6 +485,8 @@
     if (Math.abs(dx) > 40) step(dx < 0 ? 1 : -1);
     touchX = null;
   }, { passive: true });
+
+  load();
 })();
 </script>
 </body>
