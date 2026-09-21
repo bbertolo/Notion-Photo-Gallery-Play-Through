@@ -126,6 +126,25 @@
   #prev { left: 10px; }
   #next { right: 10px; }
 
+  #captionbar {
+    flex: none;
+    padding: 10px 16px 0;
+  }
+  #captioninput {
+    width: 100%;
+    font: inherit;
+    text-align: center;
+    color: var(--ink);
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid transparent;
+    padding: 6px 8px;
+    outline: none;
+  }
+  #captioninput::placeholder { color: var(--muted); }
+  #captioninput:hover { border-bottom-color: var(--line); }
+  #captioninput:focus { border-bottom-color: var(--muted); }
+
   #strip {
     display: flex;
     gap: 8px;
@@ -181,6 +200,9 @@
     <button class="navbtn" id="prev" aria-label="Previous photo">&#8249;</button>
     <button class="navbtn" id="next" aria-label="Next photo">&#8250;</button>
   </div>
+  <div id="captionbar">
+    <input id="captioninput" type="text" placeholder="Add a caption…" maxlength="200" aria-label="Photo caption">
+  </div>
   <div id="strip" role="tablist" aria-label="Photo thumbnails"></div>
 </div>
 
@@ -196,6 +218,14 @@
   var counter = document.getElementById("counter");
   var caption = document.getElementById("caption");
   var strip = document.getElementById("strip");
+  var captionInput = document.getElementById("captioninput");
+
+  captionInput.addEventListener("input", function () {
+    if (photos[index]) photos[index].caption = captionInput.value;
+  });
+  captionInput.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") captionInput.blur();
+  });
 
   function readFiles(fileList) {
     var files = Array.prototype.filter.call(fileList, function (f) {
@@ -229,6 +259,7 @@
     photo.alt = p.name;
     caption.textContent = p.name;
     counter.textContent = (index + 1) + " / " + photos.length;
+    captionInput.value = p.caption || "";
 
     strip.innerHTML = "";
     photos.forEach(function (item, i) {
@@ -265,6 +296,7 @@
   document.getElementById("next").addEventListener("click", function () { step(1); });
 
   document.addEventListener("keydown", function (e) {
+    if (e.target === captionInput) return;
     if (e.key === "ArrowLeft") step(-1);
     if (e.key === "ArrowRight") step(1);
   });
